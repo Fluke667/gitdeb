@@ -1,0 +1,48 @@
+# Spanish Language File for gitdeb
+# Archivo de idioma español para gitdeb
+
+# Error messages / Mensajes de error
+error_root_required="Este comando requiere privilegios de root"
+error_package_not_found="Paquete '%s' no encontrado en %s"
+error_missing_argument="Falta el argumento requerido: %s"
+error_key_not_found="Clave GPG no encontrada: %s"
+error_signature_verification_failed="La verificación de la firma GPG falló"
+error_checksum_mismatch="La verificación de la suma de comprobación falló"
+
+# Info messages / Mensajes informativos
+info_initializing="Inicializando gitdeb..."
+info_installing="Instalando %s..."
+info_removing="Eliminando %s..."
+info_upgrading="Actualizando %s..."
+info_downloading="Descargando: %s"
+info_fetching_release="Obteniendo información de versión para %s..."
+info_found_version="Versión encontrada: %s"
+info_verifying_signature="Verificando firma GPG..."
+info_verifying_checksum="Verificando suma de comprobación..."
+info_checking_dependencies="Verificando dependencias..."
+info_creating_backup="Creando copia de seguridad..."
+
+# Success messages / Mensajes de éxito
+success_installed="Paquete '%s' instalado correctamente (versión: %s)"
+success_removed="Paquete '%s' eliminado correctamente"
+success_upgraded="Paquete '%s' actualizado correctamente a la versión %s"
+success_config_created="Archivo de configuración creado"
+success_db_created="Base de datos creada"
+success_signature_verified="Firma GPG verificada"
+success_checksum_verified="Suma de comprobación verificada"
+
+# Warning messages / Mensajes de advertencia
+warning_no_updates="No hay actualizaciones disponibles para %s"
+warning_package_locked="El paquete '%s' está bloqueado"
+
+# Help sections / Secciones de ayuda
+help_usage="Uso: gitdeb <comando> [opciones]"
+help_package_management="Gestión de paquetes:"
+help_information="Información:"
+help_package_control="Control de paquetes:"
+help_security="Seguridad:"
+help_system="Sistema:"
+help_misc="Miscelánea:"
+help_configuration="Configuración:"
+help_examples="Ejemplos:"
+help_auto_update_setup="Configuración de actualizaciones automáticas:"
