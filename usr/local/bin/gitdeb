@@ -1,0 +1,1088 @@
+#!/bin/bash
+
+# gitdeb - GitHub .deb Package Manager
+# Version: 1.0.0
+# Description: Manage .deb packages from GitHub releases
+
+set -e
+
+VERSION="1.0.0"
+
+# Color codes
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Default paths
+BASE_DIR="/etc/gitdeb"
+CONFIG_FILE="$BASE_DIR/config.conf"
+SOURCES_DIR="$BASE_DIR/sources.list.d"
+LANG_DIR="$BASE_DIR/lang"
+DB_FILE="$BASE_DIR/installed.db"
+CACHE_DIR="/var/cache/gitdeb"
+BACKUP_DIR="/var/backups/gitdeb"
+LOG_FILE="/var/log/gitdeb.log"
+KEYRING="/etc/gitdeb/trusted.gpg"
+
+# Default configuration
+LANGUAGE="en"
+VERIFY_SIGNATURES="yes"
+REQUIRE_SIGNATURE="no"
+VERIFY_CHECKSUMS="yes"
+AUTO_UPDATE_ENABLED="no"
+AUTO_UPDATE_INTERVAL="weekly"
+AUTO_UPDATE_TIME="03:00"
+AUTO_UPDATE_WEEKDAY="0"
+NOTIFICATIONS_ENABLED="yes"
+NOTIFICATION_METHOD="desktop"
+BACKUP_ENABLED="yes"
+BACKUP_KEEP=3
+GITHUB_TOKEN=""
+
+# Load language file
+load_language() {
+    local lang_file="$LANG_DIR/$LANGUAGE.lang"
+    if [ -f "$lang_file" ]; then
+        source "$lang_file"
+    else
+        # Fallback to English
+        if [ -f "$LANG_DIR/en.lang" ]; then
+            source "$LANG_DIR/en.lang"
+        fi
+    fi
+}
+
+# Translation function
+t() {
+    local key=$1
+    shift
+    local value="${!key}"
+    if [ -z "$value" ]; then
+        echo "$key"
+    else
+        printf "$value" "$@"
+    fi
+}
+
+# Logging functions
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"
+}
+
+info() {
+    echo -e "${BLUE}[INFO]${NC} $1"
+    log "INFO: $1"
+}
+
+success() {
+    echo -e "${GREEN}[SUCCESS]${NC} $1"
+    log "SUCCESS: $1"
+}
+
+warning() {
+    echo -e "${YELLOW}[WARNING]${NC} $1"
+    log "WARNING: $1"
+}
+
+error() {
+    echo -e "${RED}[ERROR]${NC} $1" >&2
+    log "ERROR: $1"
+}
+
+# Check if running as root
+check_root() {
+    if [ "$EUID" -ne 0 ]; then
+        error "$(t 'error_root_required')"
+        exit 1
+    fi
+}
+
+# Load configuration
+load_config() {
+    if [ -f "$CONFIG_FILE" ]; then
+        source "$CONFIG_FILE"
+    fi
+    load_language
+}
+
+# Initialize gitdeb
+init_gitdeb() {
+    check_root
+
+    info "$(t 'info_initializing')"
+
+    # Create directories
+    mkdir -p "$BASE_DIR" "$SOURCES_DIR" "$LANG_DIR" "$CACHE_DIR" "$BACKUP_DIR"
+    mkdir -p "$(dirname "$LOG_FILE")"
+
+    # Create default config if not exists
+    if [ ! -f "$CONFIG_FILE" ]; then
+        cat > "$CONFIG_FILE" << 'EOF'
+# gitdeb Configuration File
+
+# Language (en, de)
+LANGUAGE="en"
+
+# Security Settings
+VERIFY_SIGNATURES="yes"
+REQUIRE_SIGNATURE="no"
+VERIFY_CHECKSUMS="yes"
+
+# Auto-Update Settings
+AUTO_UPDATE_ENABLED="no"
+AUTO_UPDATE_INTERVAL="weekly"  # daily, weekly, monthly
+AUTO_UPDATE_TIME="03:00"
+AUTO_UPDATE_WEEKDAY="0"  # 0=Sunday, 1=Monday, etc.
+
+# Notification Settings
+NOTIFICATIONS_ENABLED="yes"
+NOTIFICATION_METHOD="desktop"  # desktop, email, log
+
+# Backup Settings
+BACKUP_ENABLED="yes"
+BACKUP_KEEP=3
+
+# GitHub API Token (optional, for higher rate limits)
+GITHUB_TOKEN=""
+
+# Cache Settings
+CACHE_DIR="/var/cache/gitdeb"
+BACKUP_DIR="/var/backups/gitdeb"
+
+# Log Settings
+LOG_FILE="/var/log/gitdeb.log"
+LOG_LEVEL="info"  # debug, info, warning, error
+EOF
+        success "$(t 'success_config_created')"
+    fi
+
+    # Create database if not exists
+    if [ ! -f "$DB_FILE" ]; then
+        touch "$DB_FILE"
+        success "$(t 'success_db_created')"
+    fi
+
+    # Create English language file
+    if [ ! -f "$LANG_DIR/en.lang" ]; then
+        cat > "$LANG_DIR/en.lang" << 'EOF'
+# English Language File for gitdeb
+
+error_root_required="This command requires root privileges"
+error_package_not_found="Package '%s' not found in %s"
+error_missing_argument="Missing required argument: %s"
+error_key_not_found="GPG key not found: %s"
+error_signature_verification_failed="GPG signature verification failed"
+error_checksum_mismatch="Checksum verification failed"
+
+info_initializing="Initializing gitdeb..."
+info_installing="Installing %s..."
+info_removing="Removing %s..."
+info_upgrading="Upgrading %s..."
+info_downloading="Downloading: %s"
+info_fetching_release="Fetching release information for %s..."
+info_found_version="Found version: %s"
+info_verifying_signature="Verifying GPG signature..."
+info_verifying_checksum="Verifying checksum..."
+info_checking_dependencies="Checking dependencies..."
+info_creating_backup="Creating backup..."
+
+success_installed="Package '%s' successfully installed (version: %s)"
+success_removed="Package '%s' successfully removed"
+success_upgraded="Package '%s' successfully upgraded to version %s"
+success_config_created="Configuration file created"
+success_db_created="Database created"
+success_signature_verified="GPG signature verified"
+success_checksum_verified="Checksum verified"
+
+warning_no_updates="No updates available for %s"
+warning_package_locked="Package '%s' is locked"
+
+help_usage="Usage: gitdeb <command> [options]"
+help_package_management="Package Management:"
+help_information="Information:"
+help_package_control="Package Control:"
+help_security="Security:"
+help_system="System:"
+help_misc="Miscellaneous:"
+help_configuration="Configuration:"
+help_examples="Examples:"
+help_auto_update_setup="Auto-Update Setup:"
+EOF
+    fi
+
+    # Create German language file
+    if [ ! -f "$LANG_DIR/de.lang" ]; then
+        cat > "$LANG_DIR/de.lang" << 'EOF'
+# German Language File for gitdeb
+
+error_root_required="Dieser Befehl erfordert Root-Rechte"
+error_package_not_found="Paket '%s' nicht gefunden in %s"
+error_missing_argument="Fehlendes erforderliches Argument: %s"
+error_key_not_found="GPG-Schlüssel nicht gefunden: %s"
+error_signature_verification_failed="GPG-Signaturprüfung fehlgeschlagen"
+error_checksum_mismatch="Prüfsummenverifizierung fehlgeschlagen"
+
+info_initializing="Initialisiere gitdeb..."
+info_installing="Installiere %s..."
+info_removing="Entferne %s..."
+info_upgrading="Aktualisiere %s..."
+info_downloading="Lade herunter: %s"
+info_fetching_release="Hole Release-Informationen für %s..."
+info_found_version="Gefundene Version: %s"
+info_verifying_signature="Verifiziere GPG-Signatur..."
+info_verifying_checksum="Verifiziere Prüfsumme..."
+info_checking_dependencies="Prüfe Abhängigkeiten..."
+info_creating_backup="Erstelle Backup..."
+
+success_installed="Paket '%s' erfolgreich installiert (Version: %s)"
+success_removed="Paket '%s' erfolgreich entfernt"
+success_upgraded="Paket '%s' erfolgreich aktualisiert auf Version %s"
+success_config_created="Konfigurationsdatei erstellt"
+success_db_created="Datenbank erstellt"
+success_signature_verified="GPG-Signatur verifiziert"
+success_checksum_verified="Prüfsumme verifiziert"
+
+warning_no_updates="Keine Updates verfügbar für %s"
+warning_package_locked="Paket '%s' ist gesperrt"
+
+help_usage="Verwendung: gitdeb <befehl> [optionen]"
+help_package_management="Paketverwaltung:"
+help_information="Information:"
+help_package_control="Paketsteuerung:"
+help_security="Sicherheit:"
+help_system="System:"
+help_misc="Verschiedenes:"
+help_configuration="Konfiguration:"
+help_examples="Beispiele:"
+help_auto_update_setup="Auto-Update Einrichtung:"
+EOF
+    fi
+
+    success "gitdeb initialized successfully"
+    info "Configuration: $CONFIG_FILE"
+    info "Package sources: $SOURCES_DIR"
+    info "Language files: $LANG_DIR"
+}
+
+# Check system dependencies
+check_system() {
+    info "Checking system dependencies..."
+
+    local deps=("curl" "jq" "dpkg" "apt" "gpg")
+    local missing=()
+
+    for dep in "${deps[@]}"; do
+        if ! command -v "$dep" &> /dev/null; then
+            missing+=("$dep")
+        fi
+    done
+
+    if [ ${#missing[@]} -gt 0 ]; then
+        error "Missing dependencies: ${missing[*]}"
+        info "Install with: sudo apt install ${missing[*]}"
+        return 1
+    fi
+
+    success "All dependencies satisfied"
+    return 0
+}
+
+# Load package configuration
+load_package_config() {
+    local package=$1
+    local config_file="$SOURCES_DIR/$package.conf"
+
+    if [ ! -f "$config_file" ]; then
+        error "$(t 'error_package_not_found' "$package" "$config_file")"
+        return 1
+    fi
+
+    source "$config_file"
+    return 0
+}
+
+# Get latest release from GitHub
+get_latest_release() {
+    local repo=$1
+    local api_url="https://api.github.com/repos/$repo/releases/latest"
+
+    local headers=""
+    if [ -n "$GITHUB_TOKEN" ]; then
+        headers="-H "Authorization: token $GITHUB_TOKEN""
+    fi
+
+    eval curl -s $headers "$api_url"
+}
+
+# Download file with progress
+download_file() {
+    local url=$1
+    local output=$2
+
+    info "$(t 'info_downloading' "$(basename "$output")")"
+    curl -L --progress-bar -o "$output" "$url"
+}
+
+# Verify GPG signature
+verify_signature() {
+    local file=$1
+    local sig_file=$2
+
+    if [ "$VERIFY_SIGNATURES" != "yes" ]; then
+        return 0
+    fi
+
+    if [ ! -f "$sig_file" ]; then
+        if [ "$REQUIRE_SIGNATURE" = "yes" ]; then
+            error "$(t 'error_signature_verification_failed')"
+            return 1
+        else
+            warning "No signature file found, skipping verification"
+            return 0
+        fi
+    fi
+
+    info "$(t 'info_verifying_signature')"
+
+    if gpg --no-default-keyring --keyring "$KEYRING" --verify "$sig_file" "$file" 2>/dev/null; then
+        success "$(t 'success_signature_verified')"
+        return 0
+    else
+        error "$(t 'error_signature_verification_failed')"
+        return 1
+    fi
+}
+
+# Verify checksum
+verify_checksum() {
+    local file=$1
+    local expected=$2
+
+    if [ "$VERIFY_CHECKSUMS" != "yes" ] || [ -z "$expected" ]; then
+        return 0
+    fi
+
+    info "$(t 'info_verifying_checksum')"
+
+    local actual=$(sha256sum "$file" | awk '{print $1}')
+
+    if [ "$actual" = "$expected" ]; then
+        success "$(t 'success_checksum_verified')"
+        return 0
+    else
+        error "$(t 'error_checksum_mismatch')"
+        return 1
+    fi
+}
+
+# Check dependencies
+check_dependencies() {
+    local deps=$1
+
+    if [ -z "$deps" ]; then
+        return 0
+    fi
+
+    info "$(t 'info_checking_dependencies')"
+
+    IFS=',' read -ra DEP_ARRAY <<< "$deps"
+    local missing=()
+
+    for dep in "${DEP_ARRAY[@]}"; do
+        dep=$(echo "$dep" | xargs)  # trim whitespace
+        if ! dpkg -l | grep -q "^ii  $dep "; then
+            missing+=("$dep")
+        fi
+    done
+
+    if [ ${#missing[@]} -gt 0 ]; then
+        warning "Missing dependencies: ${missing[*]}"
+        info "Installing dependencies..."
+        apt-get update -qq
+        apt-get install -y "${missing[@]}"
+    fi
+
+    return 0
+}
+
+# Create backup
+create_backup() {
+    local package=$1
+    local version=$2
+
+    if [ "$BACKUP_ENABLED" != "yes" ]; then
+        return 0
+    fi
+
+    info "$(t 'info_creating_backup')"
+
+    local backup_file="$BACKUP_DIR/${package}_${version}_$(date +%Y%m%d_%H%M%S).deb"
+    local cache_file="$CACHE_DIR/${package}_${version}.deb"
+
+    if [ -f "$cache_file" ]; then
+        cp "$cache_file" "$backup_file"
+
+        # Keep only last N backups
+        ls -t "$BACKUP_DIR/${package}_"*.deb 2>/dev/null | tail -n +$((BACKUP_KEEP + 1)) | xargs -r rm
+    fi
+}
+
+# Import GPG key
+import_gpg_key() {
+    local key_id=$1
+    local key_url=$2
+    local key_server=$3
+
+    if [ -z "$key_id" ]; then
+        return 0
+    fi
+
+    info "Importing GPG key: $key_id"
+
+    if [ -n "$key_url" ]; then
+        curl -s "$key_url" | gpg --no-default-keyring --keyring "$KEYRING" --import
+    elif [ -n "$key_server" ]; then
+        gpg --no-default-keyring --keyring "$KEYRING" --keyserver "$key_server" --recv-keys "$key_id"
+    fi
+}
+
+# Install package
+install_package() {
+    local package=$1
+    check_root
+
+    info "$(t 'info_installing' "$package")"
+
+    if ! load_package_config "$package"; then
+        return 1
+    fi
+
+    # Import GPG key if specified
+    if [ -n "$GPG_KEY" ]; then
+        import_gpg_key "$GPG_KEY" "$GPG_KEY_URL" "$GPG_KEY_SERVER"
+    fi
+
+    # Check dependencies
+    check_dependencies "$DEPENDENCIES"
+
+    # Get latest release
+    info "$(t 'info_fetching_release' "$package")"
+    local release_data=$(get_latest_release "$REPO")
+    local version=$(echo "$release_data" | jq -r '.tag_name')
+
+    if [ -z "$version" ] || [ "$version" = "null" ]; then
+        error "Failed to fetch release information"
+        return 1
+    fi
+
+    info "$(t 'info_found_version' "$version")"
+
+    # Find matching asset
+    local asset_url=$(echo "$release_data" | jq -r ".assets[] | select(.name | test("$ASSET_FILTER")) | .browser_download_url" | head -n1)
+
+    if [ -z "$asset_url" ]; then
+        error "No matching asset found"
+        return 1
+    fi
+
+    # Download package
+    local deb_file="$CACHE_DIR/${package}_${version}.deb"
+    download_file "$asset_url" "$deb_file"
+
+    # Verify checksum if specified
+    if [ -n "$CHECKSUM" ]; then
+        verify_checksum "$deb_file" "$CHECKSUM" || return 1
+    fi
+
+    # Run pre-install hook
+    if [ -n "$PRE_INSTALL" ]; then
+        eval "$PRE_INSTALL"
+    fi
+
+    # Install package
+    info "Installing .deb package..."
+    dpkg -i "$deb_file" || apt-get install -f -y
+
+    # Run post-install hook
+    if [ -n "$POST_INSTALL" ]; then
+        eval "$POST_INSTALL"
+    fi
+
+    # Update database
+    echo "$package|$version|$(date +%s)|$REPO" >> "$DB_FILE"
+
+    success "$(t 'success_installed' "$package" "$version")"
+}
+
+# Remove package
+remove_package() {
+    local package=$1
+    check_root
+
+    info "$(t 'info_removing' "$package")"
+
+    if ! load_package_config "$package"; then
+        return 1
+    fi
+
+    # Run pre-remove hook
+    if [ -n "$PRE_REMOVE" ]; then
+        eval "$PRE_REMOVE"
+    fi
+
+    # Remove package
+    apt-get remove -y "$NAME" || dpkg -r "$NAME"
+
+    # Run post-remove hook
+    if [ -n "$POST_REMOVE" ]; then
+        eval "$POST_REMOVE"
+    fi
+
+    # Update database
+    sed -i "/^$package|/d" "$DB_FILE"
+
+    success "$(t 'success_removed' "$package")"
+}
+
+# Upgrade package
+upgrade_package() {
+    local package=$1
+    check_root
+
+    info "$(t 'info_upgrading' "$package")"
+
+    if ! load_package_config "$package"; then
+        return 1
+    fi
+
+    # Check if locked
+    if [ "$LOCKED" = "yes" ]; then
+        warning "$(t 'warning_package_locked' "$package")"
+        return 0
+    fi
+
+    # Get current version
+    local current_version=$(grep "^$package|" "$DB_FILE" | cut -d'|' -f2)
+
+    # Get latest version
+    local release_data=$(get_latest_release "$REPO")
+    local latest_version=$(echo "$release_data" | jq -r '.tag_name')
+
+    if [ "$current_version" = "$latest_version" ]; then
+        info "$(t 'warning_no_updates' "$package")"
+        return 0
+    fi
+
+    # Create backup
+    create_backup "$package" "$current_version"
+
+    # Install new version
+    install_package "$package"
+}
+
+# Upgrade all packages
+upgrade_all() {
+    check_root
+
+    info "Upgrading all packages..."
+
+    for config_file in "$SOURCES_DIR"/*.conf; do
+        if [ -f "$config_file" ]; then
+            local package=$(basename "$config_file" .conf)
+            upgrade_package "$package"
+        fi
+    done
+}
+
+# Rollback package
+rollback_package() {
+    local package=$1
+    check_root
+
+    info "Rolling back $package..."
+
+    local backup_file=$(ls -t "$BACKUP_DIR/${package}_"*.deb 2>/dev/null | head -n1)
+
+    if [ -z "$backup_file" ]; then
+        error "No backup found for $package"
+        return 1
+    fi
+
+    info "Restoring from: $(basename "$backup_file")"
+    dpkg -i "$backup_file"
+
+    success "Package rolled back successfully"
+}
+
+# List installed packages
+list_installed() {
+    if [ ! -f "$DB_FILE" ] || [ ! -s "$DB_FILE" ]; then
+        info "No packages installed"
+        return 0
+    fi
+
+    echo -e "${BLUE}Installed Packages:${NC}"
+    echo "----------------------------------------"
+    printf "%-20s %-15s %-20s\n" "PACKAGE" "VERSION" "INSTALLED"
+    echo "----------------------------------------"
+
+    while IFS='|' read -r package version timestamp repo; do
+        local date=$(date -d "@$timestamp" '+%Y-%m-%d %H:%M' 2>/dev/null || echo "Unknown")
+        printf "%-20s %-15s %-20s\n" "$package" "$version" "$date"
+    done < "$DB_FILE"
+}
+
+# List available packages
+list_available() {
+    echo -e "${BLUE}Available Packages:${NC}"
+    echo "----------------------------------------"
+
+    for config_file in "$SOURCES_DIR"/*.conf; do
+        if [ -f "$config_file" ]; then
+            source "$config_file"
+            echo "$NAME - $DESCRIPTION"
+        fi
+    done
+}
+
+# Show package details
+show_package() {
+    local package=$1
+
+    if ! load_package_config "$package"; then
+        return 1
+    fi
+
+    echo -e "${BLUE}Package: $NAME${NC}"
+    echo "Description: $DESCRIPTION"
+    echo "Repository: $REPO"
+    echo "Homepage: $HOMEPAGE"
+    echo "Maintainer: $MAINTAINER"
+    echo "Architecture: $ARCH"
+    echo "Dependencies: $DEPENDENCIES"
+    echo "Locked: $LOCKED"
+
+    if grep -q "^$package|" "$DB_FILE" 2>/dev/null; then
+        local version=$(grep "^$package|" "$DB_FILE" | cut -d'|' -f2)
+        echo "Installed Version: $version"
+    else
+        echo "Status: Not installed"
+    fi
+}
+
+# Search packages
+search_packages() {
+    local term=$1
+
+    echo -e "${BLUE}Search results for: $term${NC}"
+    echo "----------------------------------------"
+
+    for config_file in "$SOURCES_DIR"/*.conf; do
+        if [ -f "$config_file" ]; then
+            source "$config_file"
+            if echo "$NAME $DESCRIPTION $TAGS" | grep -qi "$term"; then
+                echo "$NAME - $DESCRIPTION"
+            fi
+        fi
+    done
+}
+
+# Lock/unlock package
+lock_package() {
+    local package=$1
+    local action=$2
+    check_root
+
+    local config_file="$SOURCES_DIR/$package.conf"
+
+    if [ ! -f "$config_file" ]; then
+        error "$(t 'error_package_not_found' "$package" "$config_file")"
+        return 1
+    fi
+
+    if [ "$action" = "lock" ]; then
+        sed -i 's/^LOCKED=.*/LOCKED="yes"/' "$config_file"
+        success "Package $package locked"
+    else
+        sed -i 's/^LOCKED=.*/LOCKED="no"/' "$config_file"
+        success "Package $package unlocked"
+    fi
+}
+
+# Export package list
+export_packages() {
+    local output=${1:-gitdeb-packages.txt}
+
+    if [ ! -f "$DB_FILE" ] || [ ! -s "$DB_FILE" ]; then
+        error "No packages to export"
+        return 1
+    fi
+
+    cut -d'|' -f1 "$DB_FILE" > "$output"
+    success "Package list exported to: $output"
+}
+
+# Import package list
+import_packages() {
+    local input=$1
+    check_root
+
+    if [ ! -f "$input" ]; then
+        error "File not found: $input"
+        return 1
+    fi
+
+    while read -r package; do
+        install_package "$package"
+    done < "$input"
+}
+
+# Clean cache
+clean_cache() {
+    check_root
+
+    info "Cleaning cache..."
+    rm -rf "$CACHE_DIR"/*
+    success "Cache cleaned"
+}
+
+# Clean old backups
+clean_backups() {
+    check_root
+
+    info "Cleaning old backups..."
+
+    for package_dir in "$BACKUP_DIR"/*; do
+        if [ -d "$package_dir" ]; then
+            ls -t "$package_dir"/*.deb 2>/dev/null | tail -n +$((BACKUP_KEEP + 1)) | xargs -r rm
+        fi
+    done
+
+    success "Old backups cleaned"
+}
+
+# Setup cron job
+setup_cron() {
+    local action=$1
+    check_root
+
+    local cron_file="/etc/cron.d/gitdeb"
+
+    case "$action" in
+        enable)
+            if [ "$AUTO_UPDATE_ENABLED" != "yes" ]; then
+                error "Auto-update is disabled in config"
+                return 1
+            fi
+
+            local cron_schedule=""
+            case "$AUTO_UPDATE_INTERVAL" in
+                daily)
+                    cron_schedule="0 $(echo $AUTO_UPDATE_TIME | cut -d: -f1) * * *"
+                    ;;
+                weekly)
+                    cron_schedule="0 $(echo $AUTO_UPDATE_TIME | cut -d: -f1) * * $AUTO_UPDATE_WEEKDAY"
+                    ;;
+                monthly)
+                    cron_schedule="0 $(echo $AUTO_UPDATE_TIME | cut -d: -f1) 1 * *"
+                    ;;
+            esac
+
+            echo "$cron_schedule root /usr/local/bin/gitdeb upgrade-all >> $LOG_FILE 2>&1" > "$cron_file"
+            chmod 644 "$cron_file"
+            success "Cron job enabled"
+            ;;
+        disable)
+            rm -f "$cron_file"
+            success "Cron job disabled"
+            ;;
+        status)
+            if [ -f "$cron_file" ]; then
+                info "Cron job is enabled:"
+                cat "$cron_file"
+            else
+                info "Cron job is disabled"
+            fi
+            ;;
+    esac
+}
+
+# GPG key management
+gpg_key_list() {
+    if [ ! -f "$KEYRING" ]; then
+        info "No GPG keys imported"
+        return 0
+    fi
+
+    echo -e "${BLUE}Imported GPG Keys:${NC}"
+    gpg --no-default-keyring --keyring "$KEYRING" --list-keys
+}
+
+gpg_key_add() {
+    local key_id=$1
+    local key_url=$2
+    local key_server=${3:-keyserver.ubuntu.com}
+    check_root
+
+    if [ -z "$key_id" ]; then
+        error "$(t 'error_missing_argument' 'key_id')"
+        return 1
+    fi
+
+    import_gpg_key "$key_id" "$key_url" "$key_server"
+}
+
+gpg_key_remove() {
+    local key_id=$1
+    check_root
+
+    if [ -z "$key_id" ]; then
+        error "$(t 'error_missing_argument' 'key_id')"
+        return 1
+    fi
+
+    if [ ! -f "$KEYRING" ]; then
+        error "$(t 'error_key_not_found' "$key_id")"
+        return 1
+    fi
+
+    gpg --no-default-keyring --keyring "$KEYRING" --delete-keys "$key_id"
+
+    if [ $? -eq 0 ]; then
+        success "GPG key removed: $key_id"
+    else
+        error "Failed to remove GPG key"
+        return 1
+    fi
+}
+
+# Set language
+set_language() {
+    local lang=$1
+    check_root
+
+    if [ ! -f "$LANG_DIR/$lang.lang" ]; then
+        error "Language file not found: $lang"
+        echo "Available languages:"
+        ls -1 "$LANG_DIR"/*.lang 2>/dev/null | xargs -n1 basename | sed 's/.lang$//'
+        return 1
+    fi
+
+    # Update config file
+    if grep -q "^LANGUAGE=" "$CONFIG_FILE"; then
+        sed -i "s/^LANGUAGE=.*/LANGUAGE=\"$lang\"/" "$CONFIG_FILE"
+    else
+        echo "LANGUAGE=\"$lang\"" >> "$CONFIG_FILE"
+    fi
+
+    success "Language set to: $lang"
+    info "Restart gitdeb to apply changes"
+}
+
+# Show help
+show_help() {
+    cat << EOF
+${BLUE}gitdeb - GitHub .deb Package Manager v$VERSION${NC}
+
+${YELLOW}$(t 'help_usage')${NC}
+
+${YELLOW}$(t 'help_package_management')${NC}
+  install <package>       Install a package
+  remove <package>        Remove a package
+  upgrade <package>       Upgrade a package
+  upgrade-all             Upgrade all installed packages
+  rollback <package>      Restore previous version
+
+${YELLOW}$(t 'help_information')${NC}
+  list                    Show installed packages
+  list-available          Show available packages
+  show <package>          Show detailed package information
+  search <term>           Search for packages
+
+${YELLOW}$(t 'help_package_control')${NC}
+  lock <package>          Lock package from updates
+  unlock <package>        Unlock package
+  export [file]           Export package list
+  import <file>           Import and install package list
+
+${YELLOW}$(t 'help_security')${NC}
+  gpg-list                List imported GPG keys
+  gpg-add <id> [url]      Import GPG key
+  gpg-remove <id>         Remove GPG key
+
+${YELLOW}$(t 'help_system')${NC}
+  init                    Initialize gitdeb
+  check                   Run system check
+  clean                   Clean download cache
+  clean-backups           Clean old backups
+  cron <enable|disable|status>  Manage auto-update cron job
+  set-language <lang>     Set interface language (en, de)
+
+${YELLOW}$(t 'help_misc')${NC}
+  version                 Show version
+  help                    Show this help
+
+${YELLOW}$(t 'help_configuration')${NC}
+  Main config:            $CONFIG_FILE
+  Package definitions:    $SOURCES_DIR/*.conf
+  Language files:         $LANG_DIR/*.lang
+  Database:               $DB_FILE
+  Log file:               $LOG_FILE
+
+${YELLOW}$(t 'help_examples')${NC}
+  gitdeb install vscode
+  gitdeb upgrade-all
+  gitdeb search editor
+  gitdeb lock firefox
+  gitdeb export my-packages.txt
+  gitdeb cron enable
+  gitdeb set-language de
+  gitdeb gpg-add 0x1234567890ABCDEF
+
+${YELLOW}$(t 'help_auto_update_setup')${NC}
+  1. Edit $CONFIG_FILE
+  2. Set AUTO_UPDATE_ENABLED="yes"
+  3. Configure interval and time
+  4. Run: sudo gitdeb cron enable
+
+EOF
+}
+
+# Main program
+main() {
+    load_config
+
+    case "${1:-}" in
+        init)
+            init_gitdeb
+            ;;
+        install)
+            if [ -z "${2:-}" ]; then
+                error "$(t 'error_missing_argument' 'package name')"
+                exit 1
+            fi
+            install_package "$2"
+            ;;
+        remove)
+            if [ -z "${2:-}" ]; then
+                error "$(t 'error_missing_argument' 'package name')"
+                exit 1
+            fi
+            remove_package "$2"
+            ;;
+        upgrade)
+            if [ -z "${2:-}" ]; then
+                error "$(t 'error_missing_argument' 'package name')"
+                exit 1
+            fi
+            upgrade_package "$2"
+            ;;
+        upgrade-all)
+            upgrade_all
+            ;;
+        rollback)
+            if [ -z "${2:-}" ]; then
+                error "$(t 'error_missing_argument' 'package name')"
+                exit 1
+            fi
+            rollback_package "$2"
+            ;;
+        lock)
+            if [ -z "${2:-}" ]; then
+                error "$(t 'error_missing_argument' 'package name')"
+                exit 1
+            fi
+            lock_package "$2" "lock"
+            ;;
+        unlock)
+            if [ -z "${2:-}" ]; then
+                error "$(t 'error_missing_argument' 'package name')"
+                exit 1
+            fi
+            lock_package "$2" "unlock"
+            ;;
+        list)
+            list_installed
+            ;;
+        list-available)
+            list_available
+            ;;
+        show)
+            if [ -z "${2:-}" ]; then
+                error "$(t 'error_missing_argument' 'package name')"
+                exit 1
+            fi
+            show_package "$2"
+            ;;
+        search)
+            if [ -z "${2:-}" ]; then
+                error "$(t 'error_missing_argument' 'search term')"
+                exit 1
+            fi
+            search_packages "$2"
+            ;;
+        export)
+            export_packages "${2:-gitdeb-packages.txt}"
+            ;;
+        import)
+            if [ -z "${2:-}" ]; then
+                error "$(t 'error_missing_argument' 'file name')"
+                exit 1
+            fi
+            import_packages "$2"
+            ;;
+        check)
+            check_system
+            ;;
+        clean)
+            clean_cache
+            ;;
+        clean-backups)
+            clean_backups
+            ;;
+        cron)
+            setup_cron "${2:-status}"
+            ;;
+        gpg-list)
+            gpg_key_list
+            ;;
+        gpg-add)
+            if [ -z "${2:-}" ]; then
+                error "$(t 'error_missing_argument' 'key_id or key_url')"
+                exit 1
+            fi
+            gpg_key_add "$2" "${3:-}" "${4:-keyserver.ubuntu.com}"
+            ;;
+        gpg-remove)
+            if [ -z "${2:-}" ]; then
+                error "$(t 'error_missing_argument' 'key_id')"
+                exit 1
+            fi
+            gpg_key_remove "$2"
+            ;;
+        set-language)
+            if [ -z "${2:-}" ]; then
+                error "$(t 'error_missing_argument' 'language code')"
+                echo "Available: en, de"
+                exit 1
+            fi
+            set_language "$2"
+            ;;
+        version)
+            echo "gitdeb v$VERSION"
+            ;;
+        help|--help|-h)
+            show_help
+            ;;
+        *)
+            error "Unknown command: ${1:-}"
+            echo ""
+            show_help
+            exit 1
+            ;;
+    esac
+}
+
+main "$@"
