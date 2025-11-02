@@ -1,0 +1,48 @@
+# Italian Language File for gitdeb
+# File di lingua italiana per gitdeb
+
+# Error messages / Messaggi di errore
+error_root_required="Questo comando richiede privilegi di root"
+error_package_not_found="Pacchetto '%s' non trovato in %s"
+error_missing_argument="Argomento richiesto mancante: %s"
+error_key_not_found="Chiave GPG non trovata: %s"
+error_signature_verification_failed="La verifica della firma GPG è fallita"
+error_checksum_mismatch="La verifica del checksum è fallita"
+
+# Info messages / Messaggi informativi
+info_initializing="Inizializzazione di gitdeb..."
+info_installing="Installazione di %s..."
+info_removing="Rimozione di %s..."
+info_upgrading="Aggiornamento di %s..."
+info_downloading="Download in corso: %s"
+info_fetching_release="Recupero informazioni sulla versione per %s..."
+info_found_version="Versione trovata: %s"
+info_verifying_signature="Verifica della firma GPG..."
+info_verifying_checksum="Verifica del checksum..."
+info_checking_dependencies="Verifica delle dipendenze..."
+info_creating_backup="Creazione del backup..."
+
+# Success messages / Messaggi di successo
+success_installed="Pacchetto '%s' installato con successo (versione: %s)"
+success_removed="Pacchetto '%s' rimosso con successo"
+success_upgraded="Pacchetto '%s' aggiornato con successo alla versione %s"
+success_config_created="File di configurazione creato"
+success_db_created="Database creato"
+success_signature_verified="Firma GPG verificata"
+success_checksum_verified="Checksum verificato"
+
+# Warning messages / Messaggi di avviso
+warning_no_updates="Nessun aggiornamento disponibile per %s"
+warning_package_locked="Il pacchetto '%s' è bloccato"
+
+# Help sections / Sezioni di aiuto
+help_usage="Uso: gitdeb <comando> [opzioni]"
+help_package_management="Gestione dei pacchetti:"
+help_information="Informazioni:"
+help_package_control="Controllo dei pacchetti:"
+help_security="Sicurezza:"
+help_system="Sistema:"
+help_misc="Varie:"
+help_configuration="Configurazione:"
+help_examples="Esempi:"
+help_auto_update_setup="Configurazione aggiornamenti automatici:"
