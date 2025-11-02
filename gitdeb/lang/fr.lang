@@ -1,0 +1,48 @@
+# French Language File for gitdeb
+# Fichier de langue française pour gitdeb
+
+# Error messages / Messages d'erreur
+error_root_required="Cette commande nécessite des privilèges root"
+error_package_not_found="Paquet '%s' introuvable dans %s"
+error_missing_argument="Argument requis manquant : %s"
+error_key_not_found="Clé GPG introuvable : %s"
+error_signature_verification_failed="La vérification de la signature GPG a échoué"
+error_checksum_mismatch="La vérification de la somme de contrôle a échoué"
+
+# Info messages / Messages d'information
+info_initializing="Initialisation de gitdeb..."
+info_installing="Installation de %s..."
+info_removing="Suppression de %s..."
+info_upgrading="Mise à jour de %s..."
+info_downloading="Téléchargement : %s"
+info_fetching_release="Récupération des informations de version pour %s..."
+info_found_version="Version trouvée : %s"
+info_verifying_signature="Vérification de la signature GPG..."
+info_verifying_checksum="Vérification de la somme de contrôle..."
+info_checking_dependencies="Vérification des dépendances..."
+info_creating_backup="Création de la sauvegarde..."
+
+# Success messages / Messages de succès
+success_installed="Paquet '%s' installé avec succès (version : %s)"
+success_removed="Paquet '%s' supprimé avec succès"
+success_upgraded="Paquet '%s' mis à jour avec succès vers la version %s"
+success_config_created="Fichier de configuration créé"
+success_db_created="Base de données créée"
+success_signature_verified="Signature GPG vérifiée"
+success_checksum_verified="Somme de contrôle vérifiée"
+
+# Warning messages / Messages d'avertissement
+warning_no_updates="Aucune mise à jour disponible pour %s"
+warning_package_locked="Le paquet '%s' est verrouillé"
+
+# Help sections / Sections d'aide
+help_usage="Usage : gitdeb <commande> [options]"
+help_package_management="Gestion des paquets :"
+help_information="Information :"
+help_package_control="Contrôle des paquets :"
+help_security="Sécurité :"
+help_system="Système :"
+help_misc="Divers :"
+help_configuration="Configuration :"
+help_examples="Exemples :"
+help_auto_update_setup="Configuration des mises à jour automatiques :"
